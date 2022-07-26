@@ -1,0 +1,3 @@
+[submodule "vendors/core"]
+	path = vendors/core
+	url = git@github.com:whilesocold/playable-boilerplate.git

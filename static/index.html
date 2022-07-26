@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <!--marker_head@start-->
+        <!--marker_head@end-->
+
+        <!-- by STUDIOCATION.com -->
+        <title>playable</title>
+
+        <meta charset="UTF-8" />
+        <meta name="description" content="" />
+        <meta name="keywords" content="" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta
+            name="viewport"
+            content="initial-scale=1, width=device-width, height=device-height, viewport-fit=cover, user-scalable=no"
+        />
+
+        <meta name="area.size" content="width=320,height=480" />
+        <meta name="ad.size" content="width=320,height=480" />
+
+        <script type="text/javascript">
+            /* marker_params@start */
+            let params = {
+                linkAndroid: {
+                    value: "",
+                    type: "string",
+                    default: "",
+                    description: "",
+                },
+
+                linkIOS: {
+                    value: "",
+                    type: "string",
+                    default: "",
+                    description: "",
+                },
+
+                colorBtnInstall: {
+                    value: "0xffc600",
+                    type: "string",
+                    default: "0xffc600",
+                    description: "0-orange, 1-green, 2-blue",
+                },
+                colorTextBtnInstall: {
+                    value: "0x4e2f16",
+                    type: "string",
+                    default: "0x4e2f16",
+                    description: "",
+                },
+
+                languages: {
+                    value: "en",
+                    type: "string",
+
+                    en: {
+                        textInstall: "DOWNLOAD",
+                    },
+                },
+
+                modeOneClick: { value: false, type: "boolean", default: false, description: "" },
+                fullscreenCta: { value: true, type: "boolean", default: true, description: "" },
+                playSounds: { value: true, type: "boolean", default: true, description: "" },
+            };
+
+            let adPlatform = { value: "preview", type: "string", description: "" };
+
+            /*marker_params@end*/
+
+            window.params = params;
+            window.adPlatform = adPlatform;
+
+        </script>
+        <style>
+            * {
+                padding: 0px;
+                margin: 0px;
+                touch-action: none;
+            }
+
+            div {
+                display: block;
+            }
+
+            html,
+            body {
+                position: relative;
+                background: #ffffff;
+                display: block;
+                width: 100%;
+                height: 100vh;
+                overflow: hidden;
+                margin: 0px;
+            }
+
+            canvas {
+                background: transparent;
+            }
+
+            #main {
+                background: #ffffff no-repeat center center;
+                background-size: cover;
+                left: 0px;
+                top: 0px;
+                right: 0px;
+                bottom: 0px;
+            }
+
+            #main,
+            #main > div {
+                position: absolute;
+                left: 0px;
+                top: 0px;
+            }
+
+            #progress {
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                width: 32px;
+                height: 32px;
+                margin-left: -16px;
+                margin-top: -16px;
+                z-index: 5999;
+            }
+        </style>
+    </head>
+    <body ondragstart="return false;" ondrop="return false;">
+        <div id="main">
+            <div id="three">
+                <canvas id="canvas_three"></canvas>
+            </div>
+            <div id="pixi"></div>
+        </div>
+
+        <!--marker_libs@start-->
+
+        <% for (var js in htmlWebpackPlugin.files.js) { %>
+        <script src="<%= htmlWebpackPlugin.files.js[js] %>"></script>
+        <% } %>
+
+        <!--marker_libs@end-->
+
+        <script>
+            /*marker_load@start*/
+
+            function onContentLoaded() {
+                try {
+                    window.removeEventListener("DOMContentLoaded", onContentLoaded);
+                } catch (e) {}
+                appInit().then(function () {
+                    appLoad().then(function () {
+                        appStart();
+                    });
+                });
+            }
+
+            window.addEventListener("DOMContentLoaded", onContentLoaded);
+
+            /*marker_load@end*/
+
+            function clickAd() {
+                /*marker_click@start*/
+
+                try {
+                    if (/iphone|ipad|ipod/i.test(window.navigator.userAgent.toLowerCase())) {
+                        window.open(params.linkIOS.value);
+                    } else {
+                        window.open(params.linkAndroid.value);
+                    }
+                } catch (e) {}
+
+                /*marker_click@end*/
+            }
+        </script>
+    </body>
+</html>
