@@ -23,7 +23,8 @@ import { Joystick } from "pixi-virtual-joystick";
 import { OBB } from "three/examples/jsm/math/OBB";
 import { Enemy } from "./Enemy";
 import { Howl } from "howler";
-import { MathUtils } from "three";
+import { Box3, Box3Helper, MathUtils } from "three";
+import { degToRad } from "three/src/math/MathUtils";
 
 export class Game {
     private _app!: App3d;
@@ -41,6 +42,8 @@ export class Game {
     private _objects: THREE.Mesh[] = [];
 
     private _enemies: Enemy[] = [];
+    private _environments: THREE.Mesh[] = [];
+
     private _enemiesCount = 10;
 
     private _distanceFromCenterMax = 6;
@@ -49,7 +52,7 @@ export class Game {
     private _btnSoundOnOff!: Sprite;
 
     private _progressContainer!: Container;
-    private _progressLineMask!: Graphics;
+    private _progressLineMask!: Sprite | Graphics;
 
     private _hintContainer!: Container;
 
@@ -82,7 +85,7 @@ export class Game {
         this.initCamera();
         this.initUI();
 
-        this.setProgress(0);
+        this.setProgress(50);
         this.onResize();
 
         this._rootGroup.visible = true;
@@ -137,11 +140,37 @@ export class Game {
                     geometry.computeBoundingBox();
                     geometry.userData.obb = this.addOBB(mesh);
 
+                    if (mesh.name.includes("mPalm")) {
+                        const size = 1;
+                        geometry.userData.obb.halfSize.set(size, 1, size);
+                    } else if (mesh.name.includes("Stone")) {
+                        const size = 0.1;
+                        geometry.userData.obb.halfSize.set(size, 1, size);
+                    }
+
                     this._objects.push(mesh);
                 });
-            } else {
-                object.castShadow = true;
-                object.receiveShadow = true;
+            }
+
+            object.castShadow = true;
+            object.receiveShadow = true;
+
+            if (object.name.includes("mBush") || object.name.includes("mGrass") || object.name.includes("mPalm")) {
+                if (object.name.includes("mPalm")) {
+                    if (object.children.length > 0) {
+                        object = object.children[0];
+                    }
+                }
+
+                object.userData = {
+                    rotation: object.rotation.clone(),
+                    a0: 0,
+                    a1: 0,
+                    sa0: 0,
+                    sa1: 0,
+                    name: object.name,
+                };
+                this._environments.push(object);
             }
         });
 
@@ -160,7 +189,7 @@ export class Game {
         const scale = 0.6;
 
         player.scale.set(scale, scale, scale);
-        player.position.set(-1, 0, -0.5);
+        player.initialPosition.set(-1, 0, -0.5);
 
         glfw.scene.traverse((object: any) => {
             object.material = this._worldMaterial;
@@ -180,10 +209,18 @@ export class Game {
         const enemy = new Enemy(glfw.scene, glfw.animations);
         const scale = kind === 0 ? 0.6 : 0.5;
 
-        const dist = 3;
+        const grasses = this._environments.filter(
+            (o) => o.userData && o.userData.name && o.userData.name.includes("mGrass"),
+        );
+        let randomGrass = null;
+
+        while (!randomGrass) {
+            randomGrass = grasses[Math.floor(Math.random() * grasses.length)];
+        }
 
         enemy.scale.set(scale, scale, scale);
-        enemy.position.set(Math.random() * dist - Math.random() * dist, 0, Math.random() * dist - Math.random() * dist);
+        enemy.initialPosition.set(randomGrass.position.x, 0, randomGrass.position.z);
+
         enemy.setDirection(Math.PI * Math.random());
         enemy.setVelocityEnable(true);
 
@@ -297,28 +334,26 @@ export class Game {
         this._progressContainer.scale.set(0.6);
         this._app.getStage().addChild(this._progressContainer);
 
+        const progressBack = new Sprite(this._app.getTexture2d("progress_back"));
+        progressBack.anchor.set(0.5);
+        progressBack.scale.set(1.025, 1.2);
+        this._progressContainer.addChild(progressBack);
+
         const progressBackWhite = new Sprite(this._app.getTexture2d("progress_back_white"));
         progressBackWhite.anchor.set(0.5);
         this._progressContainer.addChild(progressBackWhite);
 
         const progressLine = new Sprite(this._app.getTexture2d("progress_line"));
         progressLine.anchor.set(0.5);
+        progressLine.scale.set(1, 0.9);
         this._progressContainer.addChild(progressLine);
 
-        this._progressLineMask = new Graphics();
-        this._progressLineMask.beginFill(0x000000);
-        this._progressLineMask.drawRect(0, 0, progressLine.width, progressLine.height);
-        this._progressLineMask.endFill();
-
-        this._progressLineMask.position.set(-progressLine.width / 2, -progressLine.height / 2);
+        this._progressLineMask = new Sprite(this._app.getTexture2d("progress_back_white"));
+        this._progressLineMask.position.set(-progressLine.width / 2, -this._progressLineMask.height / 2);
 
         this._progressContainer.addChild(this._progressLineMask);
 
         progressLine.mask = this._progressLineMask;
-
-        const progressBack = new Sprite(this._app.getTexture2d("progress_back"));
-        progressBack.anchor.set(0.5);
-        this._progressContainer.addChild(progressBack);
 
         const progressDino0 = new Sprite(this._app.getTexture2d("dino_player"));
         progressDino0.anchor.set(0.5);
@@ -348,7 +383,9 @@ export class Game {
 
     private setProgress(value: number): void {
         this._progress = value;
-        this._progressLineMask.scale.set(THREE.MathUtils.mapLinear(value, 0, 100, 0, 1), 1);
+
+        gsap.killTweensOf(this._progressLineMask.scale);
+        gsap.to(this._progressLineMask.scale, { duration: 0.25, x: THREE.MathUtils.mapLinear(value, 0, 100, 0, 1) });
     }
 
     private collect(): void {
@@ -384,59 +421,51 @@ export class Game {
         this._camera.lookAt(this._player.position);
     }
 
-    private updateOBB(players: Player[], isEnemies = false): boolean {
+    private updateOBB(players: Player[], isEnemies = false): void {
         const enemies = this._enemies.concat();
 
         for (let i = 0; i < players.length; i++) {
             const player = players[i];
-            const playerMesh = player.getMesh();
 
             // check objects collision
             for (let j = 0; j < this._objects.length; j++) {
                 const mesh = this._objects[j];
-
                 const objectOBB = mesh.geometry.userData.obb.clone();
-                const playerOBB = player.getOBB().clone();
 
                 objectOBB.applyMatrix4(mesh.matrixWorld);
-                playerOBB.applyMatrix4(playerMesh.matrixWorld);
 
-                const distanceToObject = playerOBB.center.distanceTo(objectOBB.center);
-                const distanceDelta = 0.5;
-                const distanceDelta1 = distanceDelta + 0.01;
+                const distanceToObject = player.nextPosition.distanceTo(objectOBB.center);
+                let distanceDelta = 0.4;
+
+                if (mesh.name.includes("Egg")) {
+                    distanceDelta = 0.55;
+                } else if (mesh.name.includes("Stone")) {
+                    distanceDelta = 0.2;
+                } else if (mesh.name.includes("Palm")) {
+                    distanceDelta = 0.6;
+                }
 
                 if (distanceToObject < distanceDelta) {
-                    if (isEnemies) {
-                        //const direction = Math.atan2(-(0 - player.position.x), 0 - player.position.z);
-                        const direction = Math.random() * Math.PI;
+                    player.nextPosition = player.position.clone();
 
-                        player.setDirection(direction);
-                        player.position.x += -player.getVelocity() * Math.sin(direction);
-                        player.position.z += player.getVelocity() * Math.cos(direction);
-                    } else {
+                    if (isEnemies) {
                         const direction = Math.atan2(
-                            playerOBB.center.x - objectOBB.center.x,
-                            playerOBB.center.z - objectOBB.center.z,
+                            player.nextPosition.x - objectOBB.center.x,
+                            player.nextPosition.z - objectOBB.center.z,
                         );
 
-                        player.position.x = objectOBB.center.x + distanceDelta1 * Math.sin(direction);
-                        player.position.z = objectOBB.center.z + distanceDelta1 * Math.cos(direction);
+                        player.nextPosition.x = objectOBB.center.x + (distanceDelta + 0.02) * Math.sin(direction);
+                        player.nextPosition.z = objectOBB.center.z + (distanceDelta + 0.02) * Math.cos(direction);
 
-                        return false;
+                        player.setDirection(player.getDirection() + Math.PI * 0.6);
                     }
                 }
+            }
 
-                // check world radius collision
-                const distanceFromCenter = new THREE.Vector3().distanceTo(player.position);
-                if (distanceFromCenter > this._distanceFromCenterMax) {
-                    const direction = Math.atan2(-(0 - player.position.x), 0 - player.position.z);
-
-                    player.setDirection(direction);
-                    player.position.x += -player.getVelocity() * Math.sin(direction);
-                    player.position.z += player.getVelocity() * Math.cos(direction);
-
-                    return false;
-                }
+            // check world radius collision
+            const distanceFromCenter = new THREE.Vector3().distanceTo(player.nextPosition);
+            if (distanceFromCenter > this._distanceFromCenterMax) {
+                player.setDirection(Math.atan2(-(0 - player.position.x), 0 - player.position.z));
             }
 
             if (!isEnemies) {
@@ -444,13 +473,7 @@ export class Game {
                 for (let k = 0; k < enemies.length; k++) {
                     const enemy = enemies[k];
 
-                    const enemyOOBB = enemy.getOBB().clone();
-                    const playerOBB = player.getOBB().clone();
-
-                    enemyOOBB.applyMatrix4(enemy.getMesh().matrixWorld);
-                    playerOBB.applyMatrix4(playerMesh.matrixWorld);
-
-                    const distanceToObject = playerOBB.center.distanceTo(enemyOOBB.center);
+                    const distanceToObject = player.nextPosition.distanceTo(enemy.nextPosition);
                     const distanceDelta = 0.4;
 
                     if (distanceToObject < distanceDelta) {
@@ -460,14 +483,32 @@ export class Game {
                         this._enemies.splice(this._enemies.indexOf(enemy), 1);
 
                         this.collect();
-
-                        return false;
                     }
                 }
             }
         }
+    }
 
-        return true;
+    private updateEnvironment(): void {
+        for (let i = 0; i < this._environments.length; i++) {
+            const environment = this._environments[i];
+
+            environment.userData.a0 += 4.0;
+            environment.userData.a1 += 5.5;
+
+            if (environment.userData.a0 >= 360) {
+                environment.userData.a0 -= 360;
+            }
+            if (environment.userData.a1 >= 360) {
+                environment.userData.a1 -= 360;
+            }
+
+            environment.userData.sa0 = 0.04 * Math.sin(degToRad(environment.userData.a0));
+            environment.userData.sa1 = 0.04 * Math.sin(degToRad(environment.userData.a1));
+
+            environment.rotation.x = environment.userData.rotation.x + environment.userData.sa0;
+            environment.rotation.z = environment.userData.rotation.z + environment.userData.sa1;
+        }
     }
 
     private onPlayerStepSoundEnd = (): void => {
@@ -479,9 +520,13 @@ export class Game {
     private onRender = (): void => {
         this.updateCamera();
 
-        if (this.updateOBB([this._player], false)) {
-            this._player?.update();
+        this._player?.calculate();
+
+        for (let i = 0; i < 4; i++) {
+            this.updateOBB([this._player], false);
         }
+
+        this._player?.update();
 
         if (this._player.isMoveRunning()) {
             if (!this._stepSound) {
@@ -492,9 +537,15 @@ export class Game {
             this.onPlayerStepSoundEnd();
         }
 
-        this.updateOBB(this._enemies, true);
+        this._enemies.forEach((enemy) => {
+            enemy?.calculate();
 
-        this._enemies.forEach((enemy) => enemy?.update());
+            this.updateOBB([enemy], true);
+
+            enemy?.update();
+        });
+
+        this.updateEnvironment();
     };
 
     private onResize = (): void => {

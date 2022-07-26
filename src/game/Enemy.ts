@@ -7,7 +7,7 @@ export class Enemy extends Player {
         super(group, animations);
 
         this._toVelocityMax = 0.01;
-        this._toDirectionAlpha = 0.1;
+        this._toDirectionAlpha = 0.15;
     }
 
     protected findMesh(): THREE.SkinnedMesh {

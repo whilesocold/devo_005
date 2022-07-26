@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OBB } from "three/examples/jsm/math/OBB";
+import { Enemy } from "./Enemy";
 
 export enum PlayerState {
     IDLE = "Eat",
@@ -22,14 +23,17 @@ export class Player extends THREE.Group {
 
     protected _direction = 0;
     protected _toDirection = Math.PI;
-    protected _toDirectionAlpha = 0.25;
+    protected _toDirectionAlpha = 0.4;
 
     protected _velocity = 0;
     protected _toVelocity = 0;
     protected _toVelocityMax = 0.03;
-    protected _toVelocityAlpha = 0.5;
+    protected _toVelocityAlpha = 0.6;
 
     protected _moveRunning = false;
+
+    public nextPosition: THREE.Vector3 = new THREE.Vector3(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
+    public initialPosition: THREE.Vector3 = new THREE.Vector3();
 
     constructor(group: THREE.Group, animations: THREE.AnimationClip[]) {
         super();
@@ -59,7 +63,7 @@ export class Player extends THREE.Group {
         this._animationActionsSpeed.set(PlayerState.IDLE, 0.01);
         this._animationActionsSpeed.set(PlayerState.WALK, 0.05);
 
-        this.update(true);
+        this.calculate(true);
         this.setState(PlayerState.IDLE);
     }
 
@@ -87,6 +91,10 @@ export class Player extends THREE.Group {
         this._toDirection = angle;
     }
 
+    public getDirection(): number {
+        return this._toDirection;
+    }
+
     public getVelocity(): number {
         return this._velocity;
     }
@@ -106,19 +114,28 @@ export class Player extends THREE.Group {
         this._velocity = 0;
     }
 
-    public update(force = false): void {
+    public calculate(force = false): void {
         if (force) {
             this._direction = this._toDirection;
             this._velocity = this._toVelocity;
         } else {
             this._direction = this.angleLerp(this._direction, this._toDirection, this._toDirectionAlpha);
             this._velocity = THREE.MathUtils.lerp(this._velocity, this._toVelocity, this._toVelocityAlpha);
+
+            if (this.nextPosition.x === Number.MAX_SAFE_INTEGER && this.nextPosition.y === Number.MAX_SAFE_INTEGER) {
+                this.nextPosition = this.initialPosition.clone();
+            }
+
+            this.nextPosition.x -= this._velocity * Math.sin(this._direction);
+            this.nextPosition.z += this._velocity * Math.cos(this._direction);
         }
 
         this._group.rotation.set(0, -this._direction, 0);
+    }
 
-        this.position.x -= this._velocity * Math.sin(this._direction);
-        this.position.z += this._velocity * Math.cos(this._direction);
+    public update(): void {
+        this.position.x = this.nextPosition.x;
+        this.position.z = this.nextPosition.z;
 
         if (this._state && this._animationAction) {
             this._animationMixer.update(this._animationActionsSpeed.get(this._state) || 0.025);
