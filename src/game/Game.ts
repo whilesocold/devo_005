@@ -13,7 +13,6 @@ import {
 
 import meshesConfig from "../configs/meshes.json";
 import imagesConfig from "../configs/images.json";
-import fontsConfig from "../configs/fonts.json";
 import soundsConfig from "../configs/sounds.json";
 
 import { AppEvent } from "../../vendors/core/src/app/App";
@@ -25,6 +24,28 @@ import { Enemy } from "./Enemy";
 import { Howl } from "howler";
 import { Box3, Box3Helper, MathUtils } from "three";
 import { degToRad } from "three/src/math/MathUtils";
+
+let hidden: any;
+let state: any;
+let visibilityChange: any;
+
+if (typeof document.hidden !== "undefined") {
+    hidden = "hidden";
+    visibilityChange = "visibilitychange";
+    state = "visibilityState";
+} else if (typeof (document as any).mozHidden !== "undefined") {
+    hidden = "mozHidden";
+    visibilityChange = "mozvisibilitychange";
+    state = "mozVisibilityState";
+} else if (typeof (document as any).msHidden !== "undefined") {
+    hidden = "msHidden";
+    visibilityChange = "msvisibilitychange";
+    state = "msVisibilityState";
+} else if (typeof (document as any).webkitHidden !== "undefined") {
+    hidden = "webkitHidden";
+    visibilityChange = "webkitvisibilitychange";
+    state = "webkitVisibilityState";
+}
 
 export class Game {
     private _app!: App3d;
@@ -44,25 +65,32 @@ export class Game {
     private _enemies: Enemy[] = [];
     private _environments: THREE.Mesh[] = [];
 
-    private _enemiesCount = 10;
+    private _enemiesCount = 20;
 
     private _distanceFromCenterMax = 6;
 
     private _btnDownload!: Sprite;
     private _btnSoundOnOff!: Sprite;
+    private _btnNext!: Sprite;
 
     private _progressContainer!: Container;
     private _progressLineMask!: Sprite | Graphics;
 
     private _hintContainer!: Container;
 
+    private _rewardFxContainer!: Container;
+    private _rewardFxs: Sprite[] = [];
+
     private _progress = 0;
-    private _progressAdding = 16;
+    private _progressAdding = 10;
 
     private _numGlobalClick = 0;
     private _isMute = false;
 
     private _stepSound: Howl | undefined;
+
+    private _isComplete = false;
+    private _isPause = false;
 
     constructor() {
         this._app = new App3d();
@@ -83,15 +111,24 @@ export class Game {
 
         this.initEvents();
         this.initCamera();
+        this.initRewardFx();
         this.initUI();
 
-        this.setProgress(50);
+        this.setProgress(0);
         this.onResize();
 
         this._rootGroup.visible = true;
 
         Howler.mute(false);
         Howler.volume(1);
+
+        window.addEventListener("blur", this.onBlur);
+        window.addEventListener("focus", this.onFocus);
+
+        if (getWindow().adPlatform.value == "vungle") {
+            window.addEventListener("ad-event-pause", this.onBlur);
+            window.addEventListener("ad-event-resume", this.onFocus);
+        }
 
         this._app.playSound("sBg");
     }
@@ -137,15 +174,16 @@ export class Game {
                 object.children.forEach((mesh: THREE.Mesh) => {
                     const geometry = mesh.geometry;
 
-                    geometry.computeBoundingBox();
+                    geometry.computeBoundingSphere();
                     geometry.userData.obb = this.addOBB(mesh);
 
                     if (mesh.name.includes("mPalm")) {
                         const size = 1;
-                        geometry.userData.obb.halfSize.set(size, 1, size);
+                        geometry.userData.obb.halfSize.set(size, 2, size);
+                        geometry.userData.obb.rotation.identity();
                     } else if (mesh.name.includes("Stone")) {
                         const size = 0.1;
-                        geometry.userData.obb.halfSize.set(size, 1, size);
+                        geometry.userData.obb.halfSize.set(size, 2, size);
                     }
 
                     this._objects.push(mesh);
@@ -311,7 +349,7 @@ export class Game {
     private initUI(): void {
         this._btnSoundOnOff = new Sprite(this._app.getTexture2d("btn_sound_on"));
         this._btnSoundOnOff.anchor.set(0.5);
-        this._btnSoundOnOff.scale.set(0.35);
+        this._btnSoundOnOff.scale.set(0.7);
         this._btnSoundOnOff.interactive = true;
         this._btnSoundOnOff.on("pointerdown", () => {
             this._isMute = !this._isMute;
@@ -323,7 +361,7 @@ export class Game {
 
         this._btnDownload = new Sprite(this._app.getTexture2d("btn_download"));
         this._btnDownload.anchor.set(0.5);
-        this._btnDownload.scale.set(0.6);
+        this._btnDownload.scale.set(1);
         this._btnDownload.interactive = true;
         this._btnDownload.on("pointerdown", () => {
             getWindow().clickAd();
@@ -331,7 +369,7 @@ export class Game {
         this._app.getStage().addChild(this._btnDownload);
 
         this._progressContainer = new Container();
-        this._progressContainer.scale.set(0.6);
+        this._progressContainer.scale.set(0.8);
         this._app.getStage().addChild(this._progressContainer);
 
         const progressBack = new Sprite(this._app.getTexture2d("progress_back"));
@@ -368,21 +406,70 @@ export class Game {
         this._progressContainer.addChild(progressDino1);
 
         this._hintContainer = new Container();
-        this._hintContainer.scale.set(0.5);
+        this._hintContainer.scale.set(0.8);
         this._app.getStage().addChild(this._hintContainer);
 
         const hint = new Sprite(this._app.getTexture2d("hint"));
         hint.anchor.set(0.5);
         this._hintContainer.addChild(hint);
 
-        const hintDino = new Sprite(this._app.getTexture2d("dino_enemy"));
-        hintDino.anchor.set(0.5);
-        hintDino.position.x = 80;
-        this._hintContainer.addChild(hintDino);
+        this._btnNext = new Sprite(this._app.getTexture2d("btn_next"));
+        this._btnNext.anchor.set(0.5);
+        this._btnNext.scale.set(0.75);
+        this._btnNext.alpha = 0;
+        this._btnNext.interactive = true;
+        this._btnNext.on("pointerdown", () => {
+            getWindow().clickAd();
+        });
+        this._app.getStage().addChild(this._btnNext);
+    }
+
+    private initRewardFx(): void {
+        this._rewardFxContainer = new Container();
+        this._rewardFxContainer.visible = false;
+        this._rewardFxContainer.y = 800;
+        this._app.getStage().addChild(this._rewardFxContainer);
+
+        let j = 0;
+        for (let i = 0; i < 150; i++) {
+            const sprite = new Sprite(this._app.getTexture2d("el_" + j));
+            sprite.anchor.set(0.5, 0.5);
+            sprite.visible = false;
+
+            this._rewardFxContainer.addChild(sprite);
+            this._rewardFxs.push(sprite);
+
+            j++;
+
+            if (j >= 5) {
+                j = 0;
+            }
+        }
+    }
+
+    private playRewardFx(): void {
+        this._rewardFxContainer.visible = true;
+        this._rewardFxContainer.alpha = 1;
+
+        for (let i = 0; i < this._rewardFxs.length; i++) {
+            const sprite = this._rewardFxs[i] as any;
+
+            sprite.visible = true;
+            sprite.x = this._app.getWidth() - this._app.getWidth() * Math.random();
+            sprite.y = 0;
+            sprite.rotation = 6 * Math.random();
+            sprite.scale.set(0.6 + 0.6 * Math.random());
+
+            sprite.vx = 10 - 20 * Math.random();
+            sprite.vy = -10 - 70 * Math.random();
+            sprite.vr = 0.1 * (10 - 20 * Math.random());
+        }
     }
 
     private setProgress(value: number): void {
         this._progress = value;
+
+        console.log(value);
 
         gsap.killTweensOf(this._progressLineMask.scale);
         gsap.to(this._progressLineMask.scale, { duration: 0.25, x: THREE.MathUtils.mapLinear(value, 0, 100, 0, 1) });
@@ -392,9 +479,33 @@ export class Game {
         this.setProgress(this._progress + this._progressAdding);
         this._app.playSound("sBonus_1");
 
-        if (this._progress >= 100) {
-            getWindow().clickAd();
+        if (this._progress >= 99) {
+            this.complete();
+        }
+    }
+
+    private complete(): void {
+        if (!this._isComplete) {
+            this._isComplete = true;
+
+            this._player.setVelocityEnable(false);
+            this.onJoystickEnd();
+
             this._app.playSound("sWin");
+
+            gsap.killTweensOf(this._progressContainer);
+            gsap.to(this._progressContainer, { duration: 0.3, alpha: 0 });
+
+            gsap.killTweensOf(this._btnNext);
+            gsap.to(this._btnNext, { duration: 0.3, alpha: 1 });
+
+            gsap.killTweensOf(this._btnDownload);
+            gsap.to(this._btnDownload, { duration: 0.3, alpha: 0 });
+
+            gsap.killTweensOf(this._player.scale);
+            gsap.to(this._player.scale, { duration: 0.3, x: 2, y: 2, z: 2 });
+
+            this.playRewardFx();
         }
     }
 
@@ -403,22 +514,34 @@ export class Game {
             return;
         }
 
-        this._player.updateMatrixWorld();
-
         const { width, height } = this._app.getSize();
 
-        const offset = width < height ? 3 : 3;
+        if (this._isComplete) {
+            this._worldMesh.updateMatrixWorld();
 
-        const relativeCameraOffset = new THREE.Vector3(0, offset, offset);
-        const cameraOffset = relativeCameraOffset.applyMatrix4(this._player.matrixWorld);
+            const offset = 6;
 
-        if (force) {
-            this._camera.position.copy(cameraOffset);
+            const relativeCameraOffset = new THREE.Vector3(0, offset, offset);
+            const cameraOffset = relativeCameraOffset.applyMatrix4(this._worldMesh.matrixWorld);
+
+            this._camera.position.lerp(cameraOffset, 0.2);
+            this._camera.lookAt(this._worldMesh.position);
         } else {
-            this._camera.position.lerp(cameraOffset, force ? 1 : 0.25);
-        }
+            this._player.updateMatrixWorld();
 
-        this._camera.lookAt(this._player.position);
+            const offset = width < height ? 3 : 3;
+
+            const relativeCameraOffset = new THREE.Vector3(0, offset, offset);
+            const cameraOffset = relativeCameraOffset.applyMatrix4(this._player.matrixWorld);
+
+            if (force) {
+                this._camera.position.copy(cameraOffset);
+            } else {
+                this._camera.position.lerp(cameraOffset, force ? 1 : 0.25);
+            }
+
+            this._camera.lookAt(this._player.position);
+        }
     }
 
     private updateOBB(players: Player[], isEnemies = false): void {
@@ -442,7 +565,7 @@ export class Game {
                 } else if (mesh.name.includes("Stone")) {
                     distanceDelta = 0.2;
                 } else if (mesh.name.includes("Palm")) {
-                    distanceDelta = 0.6;
+                    distanceDelta = 0.41;
                 }
 
                 if (distanceToObject < distanceDelta) {
@@ -511,6 +634,24 @@ export class Game {
         }
     }
 
+    private updateRewardFx(): void {
+        for (let i = 0; i < this._rewardFxs.length; i++) {
+            const sprite = this._rewardFxs[i] as any;
+            if (sprite.visible) {
+                sprite.x += sprite.vx;
+                sprite.y += sprite.vy;
+                sprite.rotation += sprite.vr;
+
+                sprite.vx *= 0.97;
+                sprite.vy += 1.5;
+
+                if (sprite.y > 20) {
+                    sprite.visible = false;
+                }
+            }
+        }
+    }
+
     private onPlayerStepSoundEnd = (): void => {
         this._stepSound?.stop();
         this._stepSound?.off("end", this.onPlayerStepSoundEnd);
@@ -518,6 +659,10 @@ export class Game {
     };
 
     private onRender = (): void => {
+        if (this._isPause) {
+            return;
+        }
+
         this.updateCamera();
 
         this._player?.calculate();
@@ -546,10 +691,14 @@ export class Game {
         });
 
         this.updateEnvironment();
+        this.updateRewardFx();
     };
 
     private onResize = (): void => {
-        const { width, height } = this._app.getSize();
+        let { width, height } = this._app.getSize();
+
+        width *= 1.5;
+        height *= 1.5;
 
         const centerBottom = this._app.getStage().toLocal(new Point(width / 2, height));
         const rightBottom = this._app.getStage().toLocal(new Point(0, height));
@@ -557,7 +706,7 @@ export class Game {
         const center = this._app.getStage().toLocal(new Point(width / 2, height / 2));
 
         this._progressContainer.position.set(
-            leftTop.x - this._progressContainer.width / 2,
+            Math.max(center.x, leftTop.x - (this._progressContainer.width / 2) * 2),
             leftTop.y + this._progressContainer.height,
         );
 
@@ -569,9 +718,14 @@ export class Game {
         );
 
         this._hintContainer.position.set(center.x, center.y);
+        this._btnNext.position.set(centerBottom.x, centerBottom.y - this._btnNext.height * 2);
     };
 
     private onJoystickStart = (): void => {
+        if (this._isComplete) {
+            return;
+        }
+
         this._player?.setVelocityEnable(true);
 
         gsap.killTweensOf(this._joystick);
@@ -584,6 +738,10 @@ export class Game {
     };
 
     private onJoystickEnd = (): void => {
+        if (this._isComplete) {
+            return;
+        }
+
         this._player?.setVelocityEnable(false);
 
         gsap.killTweensOf(this._joystick);
@@ -591,8 +749,65 @@ export class Game {
     };
 
     private onJoystickChange = (props: any): void => {
+        if (this._isComplete) {
+            return;
+        }
+
         const { angle } = props;
 
         this._player?.setDirection(((-angle - 90) * Math.PI) / 180);
+    };
+
+    private canvasVisibilityChange = (): void => {
+        const doc = document as any;
+
+        if (doc[hidden] || doc[state] == "hidden") {
+            try {
+                Howler.mute(true);
+            } catch (e) {}
+            try {
+                gsap.globalTimeline.pause();
+            } catch (e) {}
+
+            this._player.setVelocityEnable(false);
+            this.onJoystickEnd();
+
+            this._isPause = true;
+        } else {
+            if (!this._isMute && getWindow().adPlatform.value != "ironsource_dapi") {
+                Howler.mute(false);
+                try {
+                    gsap.globalTimeline.resume();
+                } catch (e) {}
+            }
+
+            this._isPause = false;
+        }
+    };
+
+    private onBlur = (): void => {
+        try {
+            Howler.mute(true);
+        } catch (e) {}
+        try {
+            gsap.globalTimeline.pause();
+            this._player.setVelocityEnable(false);
+            this.onJoystickEnd();
+        } catch (e) {}
+
+        this._isPause = true;
+    };
+
+    private onFocus = (): void => {
+        if (!this._isMute && getWindow().adPlatform.value != "ironsource_dapi") {
+            try {
+                Howler.mute(false);
+            } catch (e) {}
+            try {
+                gsap.globalTimeline.resume();
+            } catch (e) {}
+        }
+
+        this._isPause = false;
     };
 }
