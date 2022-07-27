@@ -1,4 +1,4 @@
-import { App3d, getWindow } from "../../vendors/core/src";
+import { App3d, getLanguage, getQueryLanguage, getWindow } from "../../vendors/core/src";
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
@@ -14,9 +14,10 @@ import {
 import meshesConfig from "../configs/meshes.json";
 import imagesConfig from "../configs/images.json";
 import soundsConfig from "../configs/sounds.json";
+import fontsConfig from "../configs/fonts.json";
 
 import { AppEvent } from "../../vendors/core/src/app/App";
-import { Container, Graphics, InteractionEvent, Point, Sprite, Text, Texture } from "pixi.js";
+import { BitmapText, Container, Graphics, InteractionEvent, Point, Sprite, Text, Texture } from "pixi.js";
 import { Player } from "./Player";
 import { Joystick } from "pixi-virtual-joystick";
 import { OBB } from "three/examples/jsm/math/OBB";
@@ -73,6 +74,8 @@ export class Game {
     private _btnSoundOnOff!: Sprite;
     private _btnNext!: Sprite;
 
+    private _completeOverlay!: Graphics;
+
     private _progressContainer!: Container;
     private _progressLineMask!: Sprite | Graphics;
 
@@ -104,6 +107,7 @@ export class Game {
     public async load(): Promise<void> {
         await this._app.loadImages(imagesConfig);
         await this._app.loadSounds(soundsConfig);
+        await this._app.loadFonts(fontsConfig);
     }
 
     public async start(): Promise<void> {
@@ -118,6 +122,7 @@ export class Game {
         this.onResize();
 
         this._rootGroup.visible = true;
+        this._joystick.alpha = 0;
 
         Howler.mute(false);
         Howler.volume(1);
@@ -346,6 +351,21 @@ export class Game {
         this.updateCamera(true);
     }
 
+    private getLocalizedString(key: string): string {
+        const curr = getLanguage();
+
+        const languages = getWindow().params.languages;
+        const data = languages ? languages[curr] : null;
+
+        if (data) {
+            if (key in data) {
+                return data[key];
+            }
+        }
+
+        return key;
+    }
+
     private initUI(): void {
         this._btnSoundOnOff = new Sprite(this._app.getTexture2d("btn_sound_on"));
         this._btnSoundOnOff.anchor.set(0.5);
@@ -367,6 +387,16 @@ export class Game {
             getWindow().clickAd();
         });
         this._app.getStage().addChild(this._btnDownload);
+
+        const btnDownloadLabel = new BitmapText(this.getLocalizedString("textInstall"), {
+            fontName: "Impact",
+            tint: getWindow().params.colorTextBtnInstall.value ?? 0x000000,
+            align: "center",
+            letterSpacing: -3,
+        });
+        btnDownloadLabel.anchor.set(0.5, 0.6);
+        btnDownloadLabel.scale.set(0.6);
+        this._btnDownload.addChild(btnDownloadLabel);
 
         this._progressContainer = new Container();
         this._progressContainer.scale.set(0.8);
@@ -406,22 +436,64 @@ export class Game {
         this._progressContainer.addChild(progressDino1);
 
         this._hintContainer = new Container();
-        this._hintContainer.scale.set(0.8);
+        this._hintContainer.scale.set(0.6);
         this._app.getStage().addChild(this._hintContainer);
+
+        const hintRectSize = { width: 600, height: 200 };
+
+        const hintGraphics = new Graphics();
+        hintGraphics.beginFill(0x000000, 0.5);
+        hintGraphics.drawRoundedRect(
+            -hintRectSize.width / 2,
+            -hintRectSize.height / 2,
+            hintRectSize.width,
+            hintRectSize.height,
+            40,
+        );
+        hintGraphics.endFill();
+        this._hintContainer.addChild(hintGraphics);
 
         const hint = new Sprite(this._app.getTexture2d("hint"));
         hint.anchor.set(0.5);
         this._hintContainer.addChild(hint);
 
+        const hintLabel = new BitmapText(this.getLocalizedString("textHint"), {
+            fontName: "Impact",
+            tint: getWindow().params.colorTextHint.value ?? 0x000000,
+            align: "center",
+            letterSpacing: -3,
+        });
+        hintLabel.anchor.set(0.5, 0.6);
+        hintLabel.scale.set(2);
+        hint.addChild(hintLabel);
+
+        this._completeOverlay = new Graphics();
+        this._completeOverlay.alpha = 0;
+        this._completeOverlay.interactive = false;
+        this._completeOverlay.on("pointerdown", () => {
+            getWindow().clickAd();
+        });
+        this._app.getStage().addChild(this._completeOverlay);
+
         this._btnNext = new Sprite(this._app.getTexture2d("btn_next"));
         this._btnNext.anchor.set(0.5);
         this._btnNext.scale.set(0.75);
         this._btnNext.alpha = 0;
-        this._btnNext.interactive = true;
+        this._btnNext.interactive = false;
         this._btnNext.on("pointerdown", () => {
             getWindow().clickAd();
         });
         this._app.getStage().addChild(this._btnNext);
+
+        const btnNextLabel = new BitmapText(this.getLocalizedString("textNextLevel"), {
+            fontName: "Impact",
+            tint: getWindow().params.colorTextNextLevel.value ?? 0x000000,
+            align: "center",
+            letterSpacing: -3,
+        });
+        btnNextLabel.anchor.set(0.5, 0.65);
+        btnNextLabel.scale.set(1.6);
+        this._btnNext.addChild(btnNextLabel);
     }
 
     private initRewardFx(): void {
@@ -486,12 +558,18 @@ export class Game {
 
     private complete(): void {
         if (!this._isComplete) {
+            this.onJoystickEnd();
+
             this._isComplete = true;
 
             this._player.setVelocityEnable(false);
-            this.onJoystickEnd();
-
             this._app.playSound("sWin");
+
+            this._completeOverlay.interactive = true;
+            this._btnNext.interactive = true;
+
+            gsap.killTweensOf(this._completeOverlay);
+            gsap.to(this._completeOverlay, { duration: 0.3, alpha: 1 });
 
             gsap.killTweensOf(this._progressContainer);
             gsap.to(this._progressContainer, { duration: 0.3, alpha: 0 });
@@ -503,7 +581,7 @@ export class Game {
             gsap.to(this._btnDownload, { duration: 0.3, alpha: 0 });
 
             gsap.killTweensOf(this._player.scale);
-            gsap.to(this._player.scale, { duration: 0.3, x: 2, y: 2, z: 2 });
+            gsap.to(this._player.scale, { duration: 1, x: 2, y: 2, z: 2 });
 
             this.playRewardFx();
         }
@@ -517,15 +595,15 @@ export class Game {
         const { width, height } = this._app.getSize();
 
         if (this._isComplete) {
-            this._worldMesh.updateMatrixWorld();
+            this._player.updateMatrixWorld();
 
-            const offset = 6;
+            const offset = 4;
 
             const relativeCameraOffset = new THREE.Vector3(0, offset, offset);
-            const cameraOffset = relativeCameraOffset.applyMatrix4(this._worldMesh.matrixWorld);
+            const cameraOffset = relativeCameraOffset.applyMatrix4(this._player.matrixWorld);
 
-            this._camera.position.lerp(cameraOffset, 0.2);
-            this._camera.lookAt(this._worldMesh.position);
+            this._camera.position.lerp(cameraOffset, 0.05);
+            this._camera.lookAt(this._player.position);
         } else {
             this._player.updateMatrixWorld();
 
@@ -665,30 +743,32 @@ export class Game {
 
         this.updateCamera();
 
-        this._player?.calculate();
+        if (!this._isComplete) {
+            this._player?.calculate();
 
-        for (let i = 0; i < 4; i++) {
-            this.updateOBB([this._player], false);
-        }
-
-        this._player?.update();
-
-        if (this._player.isMoveRunning()) {
-            if (!this._stepSound) {
-                this._stepSound = this._app.playSound(`sStep_${MathUtils.randInt(0, 2)}`);
-                this._stepSound?.once("end", this.onPlayerStepSoundEnd);
+            for (let i = 0; i < 4; i++) {
+                this.updateOBB([this._player], false);
             }
-        } else {
-            this.onPlayerStepSoundEnd();
+
+            this._player?.update();
+
+            if (this._player.isMoveRunning()) {
+                if (!this._stepSound) {
+                    this._stepSound = this._app.playSound(`sStep_${MathUtils.randInt(0, 2)}`);
+                    this._stepSound?.once("end", this.onPlayerStepSoundEnd);
+                }
+            } else {
+                this.onPlayerStepSoundEnd();
+            }
+
+            this._enemies.forEach((enemy) => {
+                enemy?.calculate();
+
+                this.updateOBB([enemy], true);
+
+                enemy?.update();
+            });
         }
-
-        this._enemies.forEach((enemy) => {
-            enemy?.calculate();
-
-            this.updateOBB([enemy], true);
-
-            enemy?.update();
-        });
 
         this.updateEnvironment();
         this.updateRewardFx();
@@ -705,12 +785,17 @@ export class Game {
         const leftTop = this._app.getStage().toLocal(new Point(width, 0));
         const center = this._app.getStage().toLocal(new Point(width / 2, height / 2));
 
+        this._completeOverlay.clear();
+        this._completeOverlay.beginFill(0x000000, 0.6);
+        this._completeOverlay.drawRect(0, 0, width, height);
+        this._completeOverlay.endFill();
+
         this._progressContainer.position.set(
-            Math.max(center.x, leftTop.x - (this._progressContainer.width / 2) * 2),
-            leftTop.y + this._progressContainer.height,
+            Math.max(center.x, leftTop.x - (this._progressContainer.width / 2) * 1.5),
+            leftTop.y + this._progressContainer.height * 1.5,
         );
 
-        this._btnDownload.position.set(centerBottom.x, centerBottom.y - this._btnDownload.height);
+        this._btnDownload.position.set(centerBottom.x, centerBottom.y - this._btnDownload.height * 1.5);
 
         this._btnSoundOnOff.position.set(
             rightBottom.x + this._btnSoundOnOff.width / 2,
